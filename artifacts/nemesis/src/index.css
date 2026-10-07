@@ -267,6 +267,7 @@
   justify-content: flex-end;
   animation: arrive .35s ease-out both;
 }
+.message-row:has(.assistant-message) { justify-content: flex-start; }
 .message-bubble {
   max-width: min(86%, 590px);
   padding: 16px 19px 13px;
@@ -279,6 +280,13 @@
   font-size: 14px;
   line-height: 1.7;
 }
+.assistant-message {
+  color: hsl(var(--foreground));
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 15px 15px 15px 3px;
+}
+.assistant-message .message-time { color: hsl(var(--muted-foreground)); }
 .message-sender {
   margin-bottom: 6px;
   color: hsl(var(--accent));

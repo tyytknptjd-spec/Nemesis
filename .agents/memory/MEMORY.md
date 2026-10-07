@@ -1,0 +1,1 @@
+- [Nemesis AI connection](nemesis-ai-connection.md) — Keep the chat local and offline until the user chooses an AI provider.

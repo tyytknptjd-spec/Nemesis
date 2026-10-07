@@ -4,14 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { chatBackend, type ChatMessage } from '@/lib/chat-backend';
 import NotFound from '@/pages/not-found';
 import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 
-type Message = {
-  id: string;
-  text: string;
-  createdAt: string;
-};
+type Message = ChatMessage;
+type StoredMessage = Omit<Message, 'role'> & { role?: Message['role'] };
 
 const STORAGE_KEY = 'nemesis-local-conversation-v1';
 const queryClient = new QueryClient();
@@ -22,11 +20,29 @@ function readConversation(): Message[] {
     if (!value) return [];
     const parsed: unknown = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((entry): entry is Message =>
-      typeof entry?.id === 'string' &&
-      typeof entry?.text === 'string' &&
-      typeof entry?.createdAt === 'string'
-    );
+    return parsed.flatMap((entry): Message[] => {
+      if (!entry || typeof entry !== 'object') return [];
+      const candidate = entry as Partial<StoredMessage>;
+      if (
+        typeof candidate.id !== 'string' ||
+        typeof candidate.text !== 'string' ||
+        !candidate.text.trim() ||
+        typeof candidate.createdAt !== 'string' ||
+        !Number.isFinite(Date.parse(candidate.createdAt)) ||
+        (candidate.role !== undefined &&
+          candidate.role !== 'user' &&
+          candidate.role !== 'assistant')
+      ) {
+        return [];
+      }
+
+      return [{
+        id: candidate.id,
+        role: candidate.role ?? 'user',
+        text: candidate.text,
+        createdAt: candidate.createdAt,
+      }];
+    });
   } catch {
     return [];
   }
@@ -36,12 +52,17 @@ function Home() {
   const [messages, setMessages] = useState<Message[]>(() =>
     typeof window === 'undefined' ? [] : readConversation()
   );
+  const messagesRef = useRef(messages);
   const [draft, setDraft] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
+  const [isResponding, setIsResponding] = useState(false);
+  const [backendError, setBackendError] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const cancelClearRef = useRef<HTMLButtonElement>(null);
+  const activeRequestRef = useRef<AbortController | null>(null);
+  const backendConnected = chatBackend.status === 'connected';
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -52,6 +73,7 @@ function Home() {
   }, [confirmClear]);
 
   function persist(nextMessages: Message[]) {
+    messagesRef.current = nextMessages;
     setMessages(nextMessages);
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextMessages));
@@ -61,19 +83,61 @@ function Home() {
     }
   }
 
+  async function requestAssistantReply(history: Message[]) {
+    const controller = new AbortController();
+    activeRequestRef.current = controller;
+    setIsResponding(true);
+    setBackendError(false);
+    try {
+      const result = await chatBackend.complete({
+        messages: history,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      if (result.status !== 'reply') return;
+
+      const text = result.text.trim();
+      if (!text) {
+        setBackendError(true);
+        return;
+      }
+
+      persist([
+        ...messagesRef.current,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role: 'assistant',
+          text,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+    } catch {
+      if (!controller.signal.aborted) setBackendError(true);
+    } finally {
+      if (activeRequestRef.current === controller) {
+        activeRequestRef.current = null;
+        setIsResponding(false);
+      }
+    }
+  }
+
   function submitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = draft.trim();
-    if (!text) return;
+    if (!text || activeRequestRef.current) return;
     const message: Message = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      role: 'user',
       text,
       createdAt: new Date().toISOString(),
     };
-    persist([...messages, message]);
+    const nextMessages = [...messagesRef.current, message];
+    persist(nextMessages);
     setDraft('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     textareaRef.current?.focus();
+    setBackendError(false);
+    if (backendConnected) void requestAssistantReply(nextMessages);
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -90,9 +154,13 @@ function Home() {
   }
 
   function clearConversation() {
+    activeRequestRef.current?.abort();
+    activeRequestRef.current = null;
+    setIsResponding(false);
     persist([]);
     setConfirmClear(false);
     setDraft('');
+    setBackendError(false);
     textareaRef.current?.focus();
   }
 
@@ -106,7 +174,7 @@ function Home() {
         </div>
         <div className="offline-pill" role="status" data-testid="status-offline">
           <span className="offline-dot" aria-hidden="true" />
-          Offline · not connected
+          {backendConnected ? 'Connected' : 'Offline · not connected'}
         </div>
       </header>
 
@@ -116,23 +184,31 @@ function Home() {
             <div className="empty-state" data-testid="empty-conversation">
               <div className="eyebrow">Conversation status</div>
               <h1 className="empty-title">
-                No messages<br /><em>just yet.</em>
+                {backendConnected ? <>Ready to<br /><em>talk.</em></> : <>No messages<br /><em>just yet.</em></>}
               </h1>
               <p className="empty-copy">
-                Nemesis is offline and not connected to an AI. Messages aren’t sent anywhere, and
-                no replies will appear.
+                {backendConnected
+                  ? 'Nemesis is connected and ready for your message.'
+                  : 'Nemesis is offline and not connected to an AI. Messages aren’t sent anywhere, and no replies will appear.'}
               </p>
               <div className="offline-explainer">
                 <span className="offline-explainer-icon" aria-hidden="true" />
-                <span><strong>Not connected</strong><br />Messages are saved only in this browser.</span>
+                <span>
+                  <strong>{backendConnected ? 'Connected' : 'Not connected'}</strong><br />
+                  {backendConnected
+                    ? 'New messages are sent to the configured AI backend.'
+                    : 'Messages are saved only in this browser.'}
+                </span>
               </div>
             </div>
           ) : (
             <ol className="message-list" aria-label="Chat messages" aria-live="polite">
               {messages.map((message) => (
                 <li className="message-row" key={message.id} data-testid={`message-${message.id}`}>
-                  <div className="message-bubble">
-                    <div className="message-sender">You</div>
+                  <div className={`message-bubble${message.role === 'assistant' ? ' assistant-message' : ''}`}>
+                    <div className="message-sender">
+                      {message.role === 'assistant' ? 'Nemesis' : 'You'}
+                    </div>
                     <div>{message.text}</div>
                     <div className="message-time">
                       {new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(message.createdAt))}
@@ -163,8 +239,8 @@ function Home() {
               <span className="keyboard-hint" id="composer-help">
                 <kbd>↵</kbd> to add <span aria-hidden="true">·</span> <kbd>shift ↵</kbd> for a new line
               </span>
-              <button className="send-button" type="submit" disabled={!draft.trim()} data-testid="button-send-message">
-                Send <ArrowUpRight size={15} strokeWidth={2} aria-hidden="true" />
+              <button className="send-button" type="submit" disabled={!draft.trim() || isResponding} data-testid="button-send-message">
+                {isResponding ? 'Waiting…' : 'Send'} <ArrowUpRight size={15} strokeWidth={2} aria-hidden="true" />
               </button>
             </div>
           </form>
@@ -173,8 +249,14 @@ function Home() {
               <span className="local-note-mark" aria-hidden="true" />
               <span>
                 {storageAvailable
-                  ? 'Offline. Messages stay in this browser and are never sent.'
-                  : 'Offline. This browser could not save your messages; they may be lost when you leave.'}
+                  ? backendError
+                    ? 'Nemesis could not finish the reply. Your message is still saved here.'
+                    : backendConnected
+                      ? 'Messages are saved in this browser. New messages are sent to the configured AI.'
+                      : 'Offline. Messages stay in this browser and are never sent.'
+                  : backendConnected
+                    ? 'Connected. This browser could not save your messages; they may be lost when you leave.'
+                    : 'Offline. This browser could not save your messages; they may be lost when you leave.'}
               </span>
             </div>
             <button
@@ -189,7 +271,11 @@ function Home() {
           </div>
         </div>
         <div className="bottom-rule">
-          <span>No AI connected · Messages stay on this device</span>
+          <span>
+            {backendConnected
+              ? 'AI connected · Messages stay on this device'
+              : 'No AI connected · Messages stay on this device'}
+          </span>
         </div>
       </main>
 
