@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Nemesis"
+description = "A focused text-chat interface for Nemesis. Users can write and review their own messages; AI replies are intentionally unavailable until a model is connected."
+version = "1.0.0"
+id = "artifacts/nemesis"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18175
+
+[services.development]
+run = "pnpm --filter @workspace/nemesis run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/nemesis", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/nemesis/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18175"
+BASE_PATH = "/"
