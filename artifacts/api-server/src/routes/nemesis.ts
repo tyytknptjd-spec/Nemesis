@@ -111,15 +111,7 @@ router.post("/nemesis/chat", async (req, res): Promise<void> => {
   });
 
   try {
-    const upstream = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-      method: "POST",
-      headers: {
-        "x-goog-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const requestBody = JSON.stringify({
         systemInstruction: {
           parts: [
             {
@@ -134,14 +126,54 @@ router.post("/nemesis/chat", async (req, res): Promise<void> => {
         generationConfig: {
           maxOutputTokens: MAX_OUTPUT_TOKENS,
         },
-      }),
-      signal: controller.signal,
-      },
-    );
+      });
+    const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+    let upstream: Response | undefined;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      upstream = await fetch(requestUrl, {
+        method: "POST",
+        headers: {
+          "x-goog-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: requestBody,
+        signal: controller.signal,
+      });
+      if (upstream.status !== 503 || attempt === 1) break;
+
+      req.log.warn(
+        { statusCode: upstream.status },
+        "Gemini is temporarily unavailable; retrying once",
+      );
+      await upstream.body?.cancel();
+      await new Promise((resolve) => setTimeout(resolve, 750));
+    }
+
+    if (!upstream) throw new Error("Gemini did not return a response");
 
     if (!upstream.ok) {
+      let providerCode: number | undefined;
+      let providerStatus: string | undefined;
+      try {
+        const body: unknown = await upstream.json();
+        if (body && typeof body === "object") {
+          const providerError = (body as { error?: unknown }).error;
+          if (providerError && typeof providerError === "object") {
+            const details = providerError as {
+              code?: unknown;
+              status?: unknown;
+            };
+            if (typeof details.code === "number") providerCode = details.code;
+            if (typeof details.status === "string") {
+              providerStatus = details.status;
+            }
+          }
+        }
+      } catch {
+        // Keep provider error bodies out of logs and client responses.
+      }
       req.log.error(
-        { statusCode: upstream.status },
+        { statusCode: upstream.status, providerCode, providerStatus },
         "Gemini rejected a Nemesis chat request",
       );
       res.status(502).json(errorResponse("Gemini could not finish the reply."));
