@@ -1,4 +1,10 @@
+import {
+  getNemesisStatus,
+  sendNemesisMessage,
+} from "@workspace/api-client-react";
+
 export type ChatMessageRole = "user" | "assistant";
+export type ChatBackendStatus = "ready" | "offline";
 
 export type ChatMessage = {
   id: string;
@@ -12,20 +18,29 @@ export type ChatBackendResult =
   | { status: "reply"; text: string };
 
 export interface ChatBackend {
-  readonly status: "offline" | "connected";
+  getStatus(signal: AbortSignal): Promise<ChatBackendStatus>;
   complete(input: {
     messages: readonly ChatMessage[];
     signal: AbortSignal;
   }): Promise<ChatBackendResult>;
 }
 
-/**
- * Default until the user chooses an AI provider. This adapter is local-only
- * and deliberately performs no network requests.
- */
 export const chatBackend: ChatBackend = {
-  status: "offline",
-  async complete() {
-    return { status: "offline", reason: "provider-not-selected" };
+  async getStatus(signal) {
+    try {
+      const result = await getNemesisStatus({ signal });
+      return result.status;
+    } catch {
+      return "offline";
+    }
+  },
+  async complete({ messages, signal }) {
+    const result = await sendNemesisMessage(
+      {
+        messages: messages.slice(-10).map(({ role, text }) => ({ role, text })),
+      },
+      { signal },
+    );
+    return { status: "reply", text: result.reply };
   },
 };

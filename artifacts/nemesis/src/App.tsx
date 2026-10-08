@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { chatBackend, type ChatMessage } from '@/lib/chat-backend';
+import { chatBackend, type ChatBackendStatus, type ChatMessage } from '@/lib/chat-backend';
 import NotFound from '@/pages/not-found';
 import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 
@@ -58,11 +58,20 @@ function Home() {
   const [storageAvailable, setStorageAvailable] = useState(true);
   const [isResponding, setIsResponding] = useState(false);
   const [backendError, setBackendError] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<ChatBackendStatus>('offline');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const cancelClearRef = useRef<HTMLButtonElement>(null);
   const activeRequestRef = useRef<AbortController | null>(null);
-  const backendConnected = chatBackend.status === 'connected';
+  const backendReady = backendStatus === 'ready';
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void chatBackend.getStatus(controller.signal).then((status) => {
+      if (!controller.signal.aborted) setBackendStatus(status);
+    });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -89,12 +98,22 @@ function Home() {
     setIsResponding(true);
     setBackendError(false);
     try {
+      if (!backendReady) {
+        const status = await chatBackend.getStatus(controller.signal);
+        if (controller.signal.aborted) return;
+        setBackendStatus(status);
+        if (status !== 'ready') return;
+      }
+
       const result = await chatBackend.complete({
         messages: history,
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      if (result.status !== 'reply') return;
+      if (result.status === 'offline') {
+        setBackendStatus('offline');
+        return;
+      }
 
       const text = result.text.trim();
       if (!text) {
@@ -137,7 +156,7 @@ function Home() {
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     textareaRef.current?.focus();
     setBackendError(false);
-    if (backendConnected) void requestAssistantReply(nextMessages);
+    void requestAssistantReply(nextMessages);
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -174,7 +193,7 @@ function Home() {
         </div>
         <div className="offline-pill" role="status" data-testid="status-offline">
           <span className="offline-dot" aria-hidden="true" />
-          {backendConnected ? 'Connected' : 'Offline · not connected'}
+          {backendReady ? 'OpenAI · ready' : 'Offline · not connected'}
         </div>
       </header>
 
@@ -184,19 +203,19 @@ function Home() {
             <div className="empty-state" data-testid="empty-conversation">
               <div className="eyebrow">Conversation status</div>
               <h1 className="empty-title">
-                {backendConnected ? <>Ready to<br /><em>talk.</em></> : <>No messages<br /><em>just yet.</em></>}
+                {backendReady ? <>Ready to<br /><em>talk.</em></> : <>No messages<br /><em>just yet.</em></>}
               </h1>
               <p className="empty-copy">
-                {backendConnected
-                  ? 'Nemesis is connected and ready for your message.'
+                {backendReady
+                  ? 'Nemesis is ready to respond through OpenAI.'
                   : 'Nemesis is offline and not connected to an AI. Messages aren’t sent anywhere, and no replies will appear.'}
               </p>
               <div className="offline-explainer">
                 <span className="offline-explainer-icon" aria-hidden="true" />
                 <span>
-                  <strong>{backendConnected ? 'Connected' : 'Not connected'}</strong><br />
-                  {backendConnected
-                    ? 'New messages are sent to the configured AI backend.'
+                  <strong>{backendReady ? 'OpenAI ready' : 'Not connected'}</strong><br />
+                  {backendReady
+                    ? 'New messages are sent to OpenAI for replies.'
                     : 'Messages are saved only in this browser.'}
                 </span>
               </div>
@@ -251,11 +270,11 @@ function Home() {
                 {storageAvailable
                   ? backendError
                     ? 'Nemesis could not finish the reply. Your message is still saved here.'
-                    : backendConnected
-                      ? 'Messages are saved in this browser. New messages are sent to the configured AI.'
+                    : backendReady
+                      ? 'Messages are saved in this browser; new messages are sent to OpenAI for replies.'
                       : 'Offline. Messages stay in this browser and are never sent.'
-                  : backendConnected
-                    ? 'Connected. This browser could not save your messages; they may be lost when you leave.'
+                  : backendReady
+                    ? 'OpenAI is ready, but this browser could not save your messages; they may be lost when you leave.'
                     : 'Offline. This browser could not save your messages; they may be lost when you leave.'}
               </span>
             </div>
@@ -272,8 +291,8 @@ function Home() {
         </div>
         <div className="bottom-rule">
           <span>
-            {backendConnected
-              ? 'AI connected · Messages stay on this device'
+            {backendReady
+              ? 'OpenAI ready · Messages stay on this device'
               : 'No AI connected · Messages stay on this device'}
           </span>
         </div>

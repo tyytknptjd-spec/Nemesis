@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: nemesis
+    description: Nemesis chat backend
 paths:
   /healthz:
     get:
@@ -24,6 +26,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /nemesis/status:
+    get:
+      operationId: getNemesisStatus
+      tags: [nemesis]
+      summary: Get Nemesis AI connection status
+      description: Reports whether the server has an OpenAI key configured without exposing it.
+      responses:
+        "200":
+          description: Current server-side AI configuration status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NemesisStatus"
+  /nemesis/chat:
+    post:
+      operationId: sendNemesisMessage
+      tags: [nemesis]
+      summary: Send a Nemesis chat turn
+      description: Sends recent conversation context to OpenAI from the server and returns the completed reply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NemesisChatInput"
+      responses:
+        "200":
+          description: Completed assistant reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NemesisChatOutput"
+        "400":
+          description: Invalid chat request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: Chat request limit reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "502":
+          description: OpenAI did not complete the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: OpenAI API key is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +91,48 @@ components:
           type: string
       required:
         - status
+    NemesisStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ready, offline]
+        model:
+          type: string
+      required: [status, model]
+    NemesisChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+      required: [role, text]
+    NemesisChatInput:
+      type: object
+      properties:
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/NemesisChatMessage"
+      required: [messages]
+    NemesisChatOutput:
+      type: object
+      properties:
+        reply:
+          type: string
+          minLength: 1
+          maxLength: 12000
+      required: [reply]
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
 
