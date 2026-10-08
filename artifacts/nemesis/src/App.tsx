@@ -193,7 +193,7 @@ function Home() {
         </div>
         <div className="offline-pill" role="status" data-testid="status-offline">
           <span className="offline-dot" aria-hidden="true" />
-          {backendReady ? 'OpenAI · ready' : 'Offline · not connected'}
+          {backendReady ? 'Gemini · ready' : 'Offline · not connected'}
         </div>
       </header>
 
@@ -207,15 +207,15 @@ function Home() {
               </h1>
               <p className="empty-copy">
                 {backendReady
-                  ? 'Nemesis is ready to respond through OpenAI.'
+                  ? 'Nemesis is ready to respond through Gemini.'
                   : 'Nemesis is offline and not connected to an AI. Messages aren’t sent anywhere, and no replies will appear.'}
               </p>
               <div className="offline-explainer">
                 <span className="offline-explainer-icon" aria-hidden="true" />
                 <span>
-                  <strong>{backendReady ? 'OpenAI ready' : 'Not connected'}</strong><br />
+                  <strong>{backendReady ? 'Gemini ready' : 'Not connected'}</strong><br />
                   {backendReady
-                    ? 'New messages are sent to OpenAI for replies.'
+                    ? 'New messages are sent to Gemini for replies.'
                     : 'Messages are saved only in this browser.'}
                 </span>
               </div>
@@ -271,10 +271,10 @@ function Home() {
                   ? backendError
                     ? 'Nemesis could not finish the reply. Your message is still saved here.'
                     : backendReady
-                      ? 'Messages are saved in this browser; new messages are sent to OpenAI for replies.'
+                      ? 'Messages are saved in this browser; new messages are sent to Gemini for replies.'
                       : 'Offline. Messages stay in this browser and are never sent.'
                   : backendReady
-                    ? 'OpenAI is ready, but this browser could not save your messages; they may be lost when you leave.'
+                    ? 'Gemini is ready, but this browser could not save your messages; they may be lost when you leave.'
                     : 'Offline. This browser could not save your messages; they may be lost when you leave.'}
               </span>
             </div>
@@ -292,7 +292,7 @@ function Home() {
         <div className="bottom-rule">
           <span>
             {backendReady
-              ? 'OpenAI ready · Messages stay on this device'
+              ? 'Gemini ready · Messages saved in this browser'
               : 'No AI connected · Messages stay on this device'}
           </span>
         </div>

@@ -31,7 +31,7 @@ paths:
       operationId: getNemesisStatus
       tags: [nemesis]
       summary: Get Nemesis AI connection status
-      description: Reports whether the server has an OpenAI key configured without exposing it.
+      description: Reports whether the server has a Gemini key configured without exposing it.
       responses:
         "200":
           description: Current server-side AI configuration status
@@ -44,7 +44,7 @@ paths:
       operationId: sendNemesisMessage
       tags: [nemesis]
       summary: Send a Nemesis chat turn
-      description: Sends recent conversation context to OpenAI from the server and returns the completed reply.
+      description: Sends recent conversation context to Google Gemini from the server and returns the completed reply.
       requestBody:
         required: true
         content:
@@ -71,13 +71,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "502":
-          description: OpenAI did not complete the request
+          description: Gemini did not complete the request
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
         "503":
-          description: OpenAI API key is not configured
+          description: Gemini API key is not configured
           content:
             application/json:
               schema:

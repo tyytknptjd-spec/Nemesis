@@ -141,7 +141,7 @@ export const getGetNemesisStatusUrl = () => {
 }
 
 /**
- * Reports whether the server has an OpenAI key configured without exposing it.
+ * Reports whether the server has a Gemini key configured without exposing it.
  * @summary Get Nemesis AI connection status
  */
 export const getNemesisStatus = async ( options?: Parameters<typeof customFetch>[1]): Promise<NemesisStatus> => {
@@ -219,7 +219,7 @@ export const getSendNemesisMessageUrl = () => {
 }
 
 /**
- * Sends recent conversation context to OpenAI from the server and returns the completed reply.
+ * Sends recent conversation context to Google Gemini from the server and returns the completed reply.
  * @summary Send a Nemesis chat turn
  */
 export const sendNemesisMessage = async (nemesisChatInput: NemesisChatInput, options?: Parameters<typeof customFetch>[1]): Promise<NemesisChatOutput> => {

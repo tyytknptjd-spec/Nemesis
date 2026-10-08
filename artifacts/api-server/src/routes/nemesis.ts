@@ -7,12 +7,12 @@ import {
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
-const OPENAI_MODEL = "gpt-6-luna";
+const GEMINI_MODEL = "gemini-3.8-flash";
 const REQUEST_WINDOW_MS = 60_000;
 const MAX_REQUESTS_PER_WINDOW = 8;
 const MAX_HISTORY_MESSAGES = 10;
 const MAX_TOTAL_MESSAGE_CHARACTERS = 20_000;
-const MAX_OUTPUT_TOKENS = 1024;
+const MAX_OUTPUT_TOKENS = 8192;
 
 let requestWindowStartedAt = 0;
 let requestsInWindow = 0;
@@ -35,41 +35,31 @@ function tryUseRequestSlot(): boolean {
 
 function extractReplyText(value: unknown): string {
   if (!value || typeof value !== "object") return "";
-  const response = value as {
-    output_text?: unknown;
-    output?: unknown;
-  };
+  const response = value as { candidates?: unknown };
+  if (!Array.isArray(response.candidates)) return "";
+  const candidate = response.candidates[0];
+  if (!candidate || typeof candidate !== "object") return "";
+  const content = (candidate as { content?: unknown }).content;
+  if (!content || typeof content !== "object") return "";
+  const parts = (content as { parts?: unknown }).parts;
+  if (!Array.isArray(parts)) return "";
 
-  if (typeof response.output_text === "string" && response.output_text.trim()) {
-    return response.output_text.trim();
-  }
-  if (!Array.isArray(response.output)) return "";
-
-  return response.output
-    .flatMap((item: unknown) => {
-      if (!item || typeof item !== "object") return [];
-      const message = item as { role?: unknown; content?: unknown };
-      if (message.role !== "assistant" || !Array.isArray(message.content)) {
-        return [];
-      }
-      return message.content.flatMap((part: unknown) => {
-        if (!part || typeof part !== "object") return [];
-        const output = part as { type?: unknown; text?: unknown };
-        return output.type === "output_text" && typeof output.text === "string"
-          ? [output.text]
-          : [];
-      });
+  return parts
+    .flatMap((part: unknown) => {
+      if (!part || typeof part !== "object") return [];
+      const text = (part as { text?: unknown }).text;
+      return typeof text === "string" ? [text] : [];
     })
     .join("")
     .trim();
 }
 
 router.get("/nemesis/status", (_req, res): void => {
-  const status = process.env.OPENAI_API_KEY?.trim() ? "ready" : "offline";
+  const status = process.env.GEMINI_API_KEY?.trim() ? "ready" : "offline";
   res.json(
     GetNemesisStatusResponse.parse({
       status,
-      model: OPENAI_MODEL,
+      model: GEMINI_MODEL,
     }),
   );
 });
@@ -82,7 +72,7 @@ router.post("/nemesis/chat", async (req, res): Promise<void> => {
     return;
   }
 
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
     res.status(503).json(errorResponse("Nemesis is not connected yet."));
     return;
@@ -121,44 +111,47 @@ router.post("/nemesis/chat", async (req, res): Promise<void> => {
   });
 
   try {
-    const upstream = await fetch("https://api.openai.com/v1/responses", {
+    const upstream = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "x-goog-api-key": apiKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: OPENAI_MODEL,
-        store: false,
-        max_output_tokens: MAX_OUTPUT_TOKENS,
-        input: [
-          {
-            role: "developer",
-            content:
-              "You are Nemesis, a helpful text assistant. Answer the user's latest message clearly and honestly, using the recent conversation for context. Do not claim to have performed actions outside this chat.",
-          },
-          ...messages.map(({ role, text }) => ({
-            role,
-            content: text,
-          })),
-        ],
+        systemInstruction: {
+          parts: [
+            {
+              text: "You are Nemesis, a helpful text assistant. Answer the user's latest message clearly and honestly, using the recent conversation for context. Do not claim to have performed actions outside this chat.",
+            },
+          ],
+        },
+        contents: messages.map(({ role, text }) => ({
+          role: role === "assistant" ? "model" : "user",
+          parts: [{ text }],
+        })),
+        generationConfig: {
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+        },
       }),
       signal: controller.signal,
-    });
+      },
+    );
 
     if (!upstream.ok) {
       req.log.error(
         { statusCode: upstream.status },
-        "OpenAI rejected a Nemesis chat request",
+        "Gemini rejected a Nemesis chat request",
       );
-      res.status(502).json(errorResponse("Nemesis could not finish the reply."));
+      res.status(502).json(errorResponse("Gemini could not finish the reply."));
       return;
     }
 
     const reply = extractReplyText(await upstream.json());
     const output = SendNemesisMessageResponse.safeParse({ reply });
     if (!output.success) {
-      req.log.error("OpenAI returned no usable text for Nemesis");
+      req.log.error("Gemini returned no usable text for Nemesis");
       res.status(502).json(errorResponse("Nemesis did not receive a usable reply."));
       return;
     }
